@@ -36,7 +36,10 @@
 behaviour_info(callbacks) ->
 	[
 		{ init, 1 },
-		{ handle_cast, 2 }
+		{ handle_cast, 2 },
+		{ handle_call, 3 },
+		{ handle_fork_cast, 3 },
+		{ handle_fork_call, 4 }
 	].
 
 %%% API
@@ -94,21 +97,43 @@ init({ main, Mod, Arg }) ->
 
 handle_call( { 'gen_wp.call', Request }, From, State = #s{
 		mod = Mod,
-		mod_state = ModState
+		mod_state = ModState,
+		fork_sup = ForkSup
 	} ) ->
-	case Mod:handle_call( Request, { 'gen_wp.reply_to', From }, ModState ) of
+	ReplyTo = { 'gen_wp.reply_to', From },
+	case Mod:handle_call( Request, ReplyTo, ModState ) of
 		{ noreply, NModState } ->
 			{ noreply, State #s{ mod_state = NModState } };
+
+		{ noreply, NModState, Timeout } ->
+			{ noreply, State #s{ mod_state = NModState }, Timeout };
+
 		{ reply, ReplyWith, NModState } ->
 			{ reply, ReplyWith, State #s{ mod_state = NModState } };
+
+		{ reply, ReplyWith, NModState, Timeout } ->
+			{ reply, ReplyWith, State #s{ mod_state = NModState }, Timeout };
+
 		{ stop, Reason, ReplyWith, NModState } ->
 			{ stop, Reason, ReplyWith, State #s{ mod_state = NModState } };
+
 		{ stop, Reason, NModState } ->
-			{ stop, Reason, State #s{ mod_state = NModState } }
+			{ stop, Reason, State #s{ mod_state = NModState } };
+
+		{ fork, ForkRequest, NModState } ->
+			{ok, _Child} = fork_handle_call( ForkSup, ReplyTo, ForkRequest ),
+			{ noreply, State #s{ mod_state = NModState } };
+
+		{ fork, ForkRequest, NModState, Timeout } ->
+			{ok, _Child} = fork_handle_call( ForkSup, ReplyTo, ForkRequest ),
+			{ noreply, State #s{ mod_state = NModState }, Timeout };
+
+		Else ->
+			{ stop, {bad_return_value, Else}, State }
 	end;
 
 handle_call( Request, _From, State = #s{} ) ->
-	{ stop, { bad_arg, Request }, State }.
+	{ stop, { badarg, Request }, badarg, State }.
 
 handle_cast( { 'gen_wp.cast', Message }, State = #s{
 		mod = Mod,
@@ -124,17 +149,24 @@ handle_cast( { 'gen_wp.cast', Message }, State = #s{
 
 		{ fork, ForkMessage, NModState } ->
 			{ ok, _Child } = fork_handle_cast( ForkSup, ForkMessage ),
-			{ noreply, NModState };
+			{ noreply, State #s{ mod_state = NModState } };
+
+		{ fork, ForkMessage, NModState, Timeout } ->
+			{ ok, _Child } = fork_handle_cast( ForkSup, ForkMessage ),
+			{ noreply, State #s{ mod_state = NModState }, Timeout };
 
 		{ stop, Reason, NModState } ->
-			{ stop, Reason, State #s{ mod_state = NModState } }
+			{ stop, Reason, State #s{ mod_state = NModState } };
+
+		Else ->
+			{ stop, {bad_return_value, Else}, State }
 	end;
 
 handle_cast( Message, State = #s{} ) ->
-	{ stop, { bad_arg, Message }, State }.
+	{ stop, { badarg, Message }, State }.
 
 handle_info( Message, State = #s{} ) ->
-	{ stop, { bad_arg, Message }, State }.
+	{ stop, { badarg, Message }, State }.
 
 terminate( _Reason, _State ) ->
 	ok.
@@ -148,6 +180,6 @@ code_change( _OldVsn, State, _Extra ) ->
 fork_handle_cast( ForkSup, ForkMessage ) ->
 	{ok, _Child} = gen_wp_fork_sup:start_child_cast( ForkSup, ForkMessage ).
 
-% fork_handle_call( ForkSup, ReplyTo, ForkRequest ) ->
-% 	{ok, _Child} = gen_wp_fork_sup:start_child_call( ForkSup, ReplyTo, ForkRequest ).
+fork_handle_call( ForkSup, ReplyTo, ForkRequest ) ->
+	{ok, _Child} = gen_wp_fork_sup:start_child_call( ForkSup, ReplyTo, ForkRequest ).
 

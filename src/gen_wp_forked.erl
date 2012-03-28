@@ -35,7 +35,7 @@ start_link( WP, { Mod, Arg }, { cast, ForkMessage } ) ->
 	gen_server:start_link( ?MODULE, { cast, WP, { Mod, Arg }, ForkMessage }, [] );
 
 start_link( WP, { Mod, Arg }, { call, ReplyTo, ForkRequest } ) ->
-	gen_server:start_link( ?MODULE, { call, WP, { Mod, Arg }, ReplyTo, ForkRequest } ).
+	gen_server:start_link( ?MODULE, { call, WP, { Mod, Arg }, ReplyTo, ForkRequest }, [] ).
 
 init({ cast, WP, { Mod, Arg }, ForkMessage }) ->
 	gen_server:cast( self(), 'gen_wp_forked.process' ),
@@ -47,6 +47,9 @@ init({ cast, WP, { Mod, Arg }, ForkMessage }) ->
 	} };
 init({ call, WP, { Mod, Arg }, ReplyTo, ForkRequest }) ->
 	gen_server:cast( self(), 'gen_wp_forked.process' ),
+	{ 'gen_wp.reply_to', { LinkTo, _ } } = ReplyTo,
+	true = erlang:link( LinkTo ),
+
 	{ ok, #s_call{
 		wp = WP,
 		mod = Mod,
@@ -56,19 +59,41 @@ init({ call, WP, { Mod, Arg }, ReplyTo, ForkRequest }) ->
 	} }.
 
 handle_call( Request, _From, State ) ->
-	{ stop, { bad_arg, Request}, State}.
+	{ stop, { badarg, Request}, State}.
 
-handle_cast( 'gen_wp_forked.process', State = #s_cast{} ) ->
-	{ stop, not_implemented, State };
+handle_cast( 'gen_wp_forked.process', State = #s_cast{
+		wp = WP,
+		mod = Mod,
+		arg = Arg,
+		msg = Msg
+	} ) ->
+	case Mod:handle_fork_cast( Arg, Msg, WP ) of
+		{ noreply, _Result } ->
+			{ stop, normal, State };
+		Else ->
+			{ stop, { bad_return_value, Else }, State }
+	end;
 
-handle_cast( 'gen_wp_forked.process', State = #s_call{} ) ->
-	{ stop, not_implemented, State };
+handle_cast( 'gen_wp_forked.process', State = #s_call{
+		wp = WP,
+		mod = Mod,
+		arg = Arg,
+		req = Req,
+		reply_to = ReplyTo
+	} ) ->
+	case Mod:handle_fork_call( Arg, Req, ReplyTo, WP ) of
+		{ noreply, _Result } ->
+			{ stop, normal, State };
+		{ reply, ReplyWith, _Result } ->
+			gen_wp:reply( ReplyTo, ReplyWith ),
+			{ stop, normal, State }
+	end;
 
 handle_cast( Request, State ) ->
-	{ stop, { bad_arg, Request }, State }.
+	{ stop, { badarg, Request }, State }.
 
 handle_info( Message, State ) ->
-	{ stop, { bad_arg, Message }, State }.
+	{ stop, { badarg, Message }, State }.
 
 terminate( _Reason, _State ) ->
 	ok.

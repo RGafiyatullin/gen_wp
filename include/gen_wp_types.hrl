@@ -15,9 +15,23 @@
 	{ noreply, mod_state() } |
 	{ noreply, mod_state(), timeout() } |
 	{ stop, stop_reason(), mod_state() } |
-	{ fork, Message :: term(), mod_state() }.
+	{ fork, Message :: term(), mod_state() } |
+	{ fork, Message :: term(), mod_state(), timeout() }.
 
--type handle_call_ret() :: 'describe me!!!!'().
+-type handle_call_ret() ::
+	{ noreply, mod_state() } |
+	{ noreply, mod_state(), timeout() } |
+	{ reply, ReplyWith :: term(), mod_state() } |
+	{ reply, ReplyWith :: term(), mod_state(), timeout() } |
+	{ stop, stop_reason(), mod_state() } |
+	{ stop, stop_reason(), ReplyWith :: term(), mod_state() } |
+	{ fork, Request :: term(), mod_state() } |
+	{ fork, Request :: term(), mod_state(), timeout() }.
 
+-type handle_fork_cast_ret() :: 
+	{ noreply, Result :: term() }.
+-type handle_fork_call_ret() ::
+	{ reply, ReplyWith :: term(), Result :: term() } |
+	{ noreply, Result :: term() }.
 
 -endif. % gen_wp_types_hrl
