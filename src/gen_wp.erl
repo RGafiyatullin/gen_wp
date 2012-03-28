@@ -184,18 +184,24 @@ handle_cast( Message, State = #s{} ) ->
 	{ stop, { badarg, Message }, State }.
 
 handle_info( Info = {'DOWN', MonRef, process, _Pid, _Reason }, State = #s{
-		ctx = Ctx
+		ctx = Ctx,
+		fork_sup = ForkSup
 	} ) ->
 	#gwp_ctx{
-		ref_to_pid = Refs
+		ref_to_pid = Refs,
+		pending_tasks = TQueue
 	} = Ctx,
 	case dict:find( MonRef, Refs ) of
 		{ok, _Child} ->
-			{ noreply, State #s{
-				ctx = Ctx #gwp_ctx{
-					ref_to_pid = dict:erase( MonRef, Refs ) 
-				} 
-			} };
+			{ MaybeTask, NTQueue } = queue:out( TQueue ),
+			NCtx = maybe_handle_task(
+				ForkSup, MaybeTask, 
+				Ctx #gwp_ctx{
+					ref_to_pid = dict:erase( MonRef, Refs ),
+					pending_tasks = NTQueue
+				} ),
+
+			{ noreply, State #s{ ctx = NCtx } };
 		error ->
 			handle_info_passthru( Info, State )
 	end;
@@ -237,6 +243,10 @@ handle_info_passthru( Info, State = #s{
 			Else ->
 				{ stop, {bad_return_value, Else}, State }
 		end.
+
+maybe_handle_task( _ForkSup, empty, Ctx ) -> Ctx;
+maybe_handle_task( ForkSup, { value, Task }, Ctx ) ->
+	handle_task( ForkSup, Task, Ctx ).
 
 handle_task(
 	ForkSup, Task, 
