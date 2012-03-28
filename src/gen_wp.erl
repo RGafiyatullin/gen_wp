@@ -66,7 +66,7 @@ cast( Server, Message ) ->
 %%% Behave as gen_server
 
 init({ main, Mod, Arg }) ->
-	{ok, ForkSup} = gen_wp_fork_sup:start_link( self() ),
+	{ok, ForkSup} = gen_wp_fork_sup:start_link( self(), Mod, Arg ),
 	case catch Mod:init( Arg ) of
 		{ ok, ModState } ->
 			{ ok, #s{
@@ -130,5 +130,8 @@ code_change( _OldVsn, State, _Extra ) ->
 %%% Internals
 
 fork_handle_cast( ForkSup, ForkMessage ) ->
-	{ok, _Child} = gen_wp_fork_sup:start_child( ForkSup, [ ForkMessage ] ).
+	{ok, _Child} = gen_wp_fork_sup:start_child_cast( ForkSup, ForkMessage ).
+
+% fork_handle_call( ForkSup, ReplyTo, ForkRequest ) ->
+% 	{ok, _Child} = gen_wp_fork_sup:start_child_call( ForkSup, ReplyTo, ForkRequest ).
 
