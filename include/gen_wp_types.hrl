@@ -17,5 +17,7 @@
 	{ stop, stop_reason(), mod_state() } |
 	{ fork, Message :: term(), mod_state() }.
 
+-type handle_call_ret() :: 'describe me!!!!'().
+
 
 -endif. % gen_wp_types_hrl

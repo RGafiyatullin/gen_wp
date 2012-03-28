@@ -11,7 +11,8 @@
 	start_link/4,
 	call/2,
 	call/3,
-	cast/2
+	cast/2,
+	reply/2
 ]).
 -export([
 	init/1,
@@ -63,6 +64,9 @@ call( Server, Request, Timeout ) ->
 cast( Server, Message ) ->
 	gen_server:cast( Server, { 'gen_wp.cast', Message } ).
 
+reply( { 'gen_wp.reply_to', ReplyTo }, ReplyWith ) ->
+	gen_server:reply( ReplyTo, ReplyWith ).
+
 %%% Behave as gen_server
 
 init({ main, Mod, Arg }) ->
@@ -88,8 +92,20 @@ init({ main, Mod, Arg }) ->
 			{ stop, { bad_return_value, Else } }
 	end.
 
-handle_call( { 'gen_wp.call', _Request }, _From, _State = #s{} ) ->
-	{ stop, not_implemented };
+handle_call( { 'gen_wp.call', Request }, From, State = #s{
+		mod = Mod,
+		mod_state = ModState
+	} ) ->
+	case Mod:handle_call( Request, { 'gen_wp.reply_to', From }, ModState ) of
+		{ noreply, NModState } ->
+			{ noreply, State #s{ mod_state = NModState } };
+		{ reply, ReplyWith, NModState } ->
+			{ reply, ReplyWith, State #s{ mod_state = NModState } };
+		{ stop, Reason, ReplyWith, NModState } ->
+			{ stop, Reason, ReplyWith, State #s{ mod_state = NModState } };
+		{ stop, Reason, NModState } ->
+			{ stop, Reason, State #s{ mod_state = NModState } }
+	end;
 
 handle_call( Request, _From, State = #s{} ) ->
 	{ stop, { bad_arg, Request }, State }.
