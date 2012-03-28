@@ -24,12 +24,14 @@
 ]).
 
 -include("gen_wp_types.hrl").
+-include("gen_wp.hrl").
 
 -record(s, {
 	mod :: module_spec(),
 	arg :: any(),
 	mod_state :: any(),
-	fork_sup :: pid()
+	fork_sup :: pid(),
+	ctx = #gwp_ctx{} :: #gwp_ctx{}
 	}).
 
 %%% Declare behaviour
@@ -38,6 +40,9 @@ behaviour_info(callbacks) ->
 		{ init, 1 },
 		{ handle_cast, 2 },
 		{ handle_call, 3 },
+		{ handle_info, 2 },
+		{ code_change, 3 },
+		{ terminate, 2 },
 		{ handle_fork_cast, 3 },
 		{ handle_fork_call, 4 }
 	].
@@ -52,10 +57,12 @@ start_link( Mod, Arg ) ->
 	start_link( Mod, Arg, [] ).
 
 start_link( Mod, Arg, Opts ) ->
-	gen_server:start_link(?MODULE, { main, Mod, Arg }, Opts).
+	PoolSize = proplists:get_value( pool_size, Opts, infinity ),
+	gen_server:start_link(?MODULE, { main, Mod, Arg, PoolSize }, proplists:delete(pool_size, Opts) ).
 
 start_link( Reg, Mod, Arg, Opts ) ->
-	gen_server:start_link(Reg, ?MODULE, { main, Mod, Arg }, Opts).
+	PoolSize = proplists:get_value( pool_size, Opts, infinity ),
+	gen_server:start_link(Reg, ?MODULE, { main, Mod, Arg, PoolSize }, proplists:delete(pool_size, Opts) ).
 
 
 call( Server, Request ) ->
@@ -72,15 +79,19 @@ reply( { 'gen_wp.reply_to', ReplyTo }, ReplyWith ) ->
 
 %%% Behave as gen_server
 
-init({ main, Mod, Arg }) ->
+init({ main, Mod, Arg, PoolSize }) ->
 	{ok, ForkSup} = gen_wp_fork_sup:start_link( self(), Mod, Arg ),
+	Ctx = #gwp_ctx{
+		max_pool_size = PoolSize
+	},
 	case catch Mod:init( Arg ) of
 		{ ok, ModState } ->
 			{ ok, #s{
 				mod = Mod,
 				arg = Arg,
 				mod_state = ModState,
-				fork_sup = ForkSup
+				fork_sup = ForkSup,
+				ctx = Ctx
 			} };
 
 		{ ok, ModState, Timeout } ->
@@ -88,7 +99,8 @@ init({ main, Mod, Arg }) ->
 				mod = Mod,
 				arg = Arg,
 				mod_state = ModState,
-				fork_sup = ForkSup
+				fork_sup = ForkSup,
+				ctx = Ctx
 			}, Timeout };
 
 		Else ->
@@ -98,10 +110,11 @@ init({ main, Mod, Arg }) ->
 handle_call( { 'gen_wp.call', Request }, From, State = #s{
 		mod = Mod,
 		mod_state = ModState,
-		fork_sup = ForkSup
+		fork_sup = ForkSup,
+		ctx = Ctx
 	} ) ->
 	ReplyTo = { 'gen_wp.reply_to', From },
-	case Mod:handle_call( Request, ReplyTo, ModState ) of
+	case catch Mod:handle_call( Request, ReplyTo, ModState ) of
 		{ noreply, NModState } ->
 			{ noreply, State #s{ mod_state = NModState } };
 
@@ -121,12 +134,14 @@ handle_call( { 'gen_wp.call', Request }, From, State = #s{
 			{ stop, Reason, State #s{ mod_state = NModState } };
 
 		{ fork, ForkRequest, NModState } ->
-			{ok, _Child} = fork_handle_call( ForkSup, ReplyTo, ForkRequest ),
-			{ noreply, State #s{ mod_state = NModState } };
+			Task = { call, ReplyTo, ForkRequest },
+			NCtx = handle_task( ForkSup, Task, Ctx ),
+			{ noreply, State #s{ mod_state = NModState, ctx = NCtx } };
 
 		{ fork, ForkRequest, NModState, Timeout } ->
-			{ok, _Child} = fork_handle_call( ForkSup, ReplyTo, ForkRequest ),
-			{ noreply, State #s{ mod_state = NModState }, Timeout };
+			Task = { call, ReplyTo, ForkRequest },
+			NCtx = handle_task( ForkSup, Task, Ctx ),
+			{ noreply, State #s{ mod_state = NModState, ctx = NCtx }, Timeout };
 
 		Else ->
 			{ stop, {bad_return_value, Else}, State }
@@ -138,9 +153,10 @@ handle_call( Request, _From, State = #s{} ) ->
 handle_cast( { 'gen_wp.cast', Message }, State = #s{
 		mod = Mod,
 		mod_state = ModState,
-		fork_sup = ForkSup
+		fork_sup = ForkSup,
+		ctx = Ctx
 	} ) ->
-	case Mod:handle_cast( Message, ModState ) of
+	case catch Mod:handle_cast( Message, ModState ) of
 		{ noreply, NModState } ->
 			{ noreply, State #s{ mod_state = NModState } };
 
@@ -148,12 +164,14 @@ handle_cast( { 'gen_wp.cast', Message }, State = #s{
 			{ noreply, State #s{ mod_state = NModState }, Timeout };
 
 		{ fork, ForkMessage, NModState } ->
-			{ ok, _Child } = fork_handle_cast( ForkSup, ForkMessage ),
-			{ noreply, State #s{ mod_state = NModState } };
+			Task = { cast, ForkMessage },
+			NCtx = handle_task( ForkSup, Task, Ctx ),
+			{ noreply, State #s{ mod_state = NModState, ctx = NCtx } };
 
 		{ fork, ForkMessage, NModState, Timeout } ->
-			{ ok, _Child } = fork_handle_cast( ForkSup, ForkMessage ),
-			{ noreply, State #s{ mod_state = NModState }, Timeout };
+			Task = { cast, ForkMessage },
+			NCtx = handle_task( ForkSup, Task, Ctx ),
+			{ noreply, State #s{ mod_state = NModState, ctx = NCtx }, Timeout };
 
 		{ stop, Reason, NModState } ->
 			{ stop, Reason, State #s{ mod_state = NModState } };
@@ -165,21 +183,78 @@ handle_cast( { 'gen_wp.cast', Message }, State = #s{
 handle_cast( Message, State = #s{} ) ->
 	{ stop, { badarg, Message }, State }.
 
-handle_info( Message, State = #s{} ) ->
-	{ stop, { badarg, Message }, State }.
+handle_info( Info = {'DOWN', MonRef, process, _Pid, _Reason }, State = #s{
+		ctx = Ctx
+	} ) ->
+	#gwp_ctx{
+		ref_to_pid = Refs
+	} = Ctx,
+	case dict:find( MonRef, Refs ) of
+		{ok, _Child} ->
+			{ noreply, State #s{
+				ctx = Ctx #gwp_ctx{
+					ref_to_pid = dict:erase( MonRef, Refs ) 
+				} 
+			} };
+		error ->
+			handle_info_passthru( Info, State )
+	end;
 
-terminate( _Reason, _State ) ->
-	ok.
+handle_info( Info, State = #s{} ) ->
+	handle_info_passthru( Info, State ).
 
-code_change( _OldVsn, State, _Extra ) ->
-	{ ok, State }.
+terminate( Reason, #s{
+	mod = Mod,
+	mod_state = ModState
+} ) ->
+	Mod:terminate( Reason, ModState ).
+
+code_change( 
+	OldVsn, 
+	State = #s{
+		mod = Mod,
+		mod_state = ModState
+	}, 
+	Extra
+) ->
+	{ ok, NModState } = Mod:code_change( OldVsn, ModState, Extra ),
+	{ ok, State #s{ mod_state = NModState } }.
 
 
 %%% Internals
 
-fork_handle_cast( ForkSup, ForkMessage ) ->
-	{ok, _Child} = gen_wp_fork_sup:start_child_cast( ForkSup, ForkMessage ).
+handle_info_passthru( Info, State = #s{
+		mod = Mod,
+		mod_state = ModState
+	} ) ->
+		case catch Mod:handle_info( Info, ModState ) of
+			{ noreply, NModState } ->
+				{ noreply, State #s{ mod_state = NModState } };
+			{ noreply, NModState, Timeout } ->
+				{ noreply, State #s{ mod_state = NModState }, Timeout };
+			{ stop, Reason, NModState } ->
+				{ stop, Reason, State #s{ mod_state = NModState } };
+			Else ->
+				{ stop, {bad_return_value, Else}, State }
+		end.
 
-fork_handle_call( ForkSup, ReplyTo, ForkRequest ) ->
-	{ok, _Child} = gen_wp_fork_sup:start_child_call( ForkSup, ReplyTo, ForkRequest ).
+handle_task(
+	ForkSup, Task, 
+	Ctx = #gwp_ctx{
+		pending_tasks = PendingTasks,
+		max_pool_size = MaxPoolSize,
+		ref_to_pid = Refs
+	}
+) ->
+	PoolSize = dict:size( Refs ),
+	if
+		MaxPoolSize == infinity orelse
+		MaxPoolSize > PoolSize ->
+			{ok, Child} = supervisor:start_child( ForkSup, [ Task ] ),
+			MonRef = erlang:monitor( process, Child ),
+			gen_server:cast( Child, 'gen_wp_forked.process' ),
+			Ctx #gwp_ctx{ ref_to_pid = dict:store( MonRef, Child, Refs ) };
+		true ->
+			Ctx #gwp_ctx{ pending_tasks = queue:in( Task, PendingTasks ) }
+	end.
 

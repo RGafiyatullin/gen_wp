@@ -37,16 +37,16 @@ start_link( WP, { Mod, Arg }, { cast, ForkMessage } ) ->
 start_link( WP, { Mod, Arg }, { call, ReplyTo, ForkRequest } ) ->
 	gen_server:start_link( ?MODULE, { call, WP, { Mod, Arg }, ReplyTo, ForkRequest }, [] ).
 
+
 init({ cast, WP, { Mod, Arg }, ForkMessage }) ->
-	gen_server:cast( self(), 'gen_wp_forked.process' ),
 	{ ok, #s_cast{
 		wp = WP,
 		mod = Mod,
 		arg = Arg,
 		msg = ForkMessage
 	} };
+
 init({ call, WP, { Mod, Arg }, ReplyTo, ForkRequest }) ->
-	gen_server:cast( self(), 'gen_wp_forked.process' ),
 	{ 'gen_wp.reply_to', { LinkTo, _ } } = ReplyTo,
 	true = erlang:link( LinkTo ),
 
@@ -67,9 +67,9 @@ handle_cast( 'gen_wp_forked.process', State = #s_cast{
 		arg = Arg,
 		msg = Msg
 	} ) ->
-	case Mod:handle_fork_cast( Arg, Msg, WP ) of
-		{ noreply, _Result } ->
-			{ stop, normal, State };
+	case catch Mod:handle_fork_cast( Arg, Msg, WP ) of
+		{ noreply, Result } ->
+			{ stop, Result, State };
 		Else ->
 			{ stop, { bad_return_value, Else }, State }
 	end;
@@ -81,12 +81,14 @@ handle_cast( 'gen_wp_forked.process', State = #s_call{
 		req = Req,
 		reply_to = ReplyTo
 	} ) ->
-	case Mod:handle_fork_call( Arg, Req, ReplyTo, WP ) of
-		{ noreply, _Result } ->
-			{ stop, normal, State };
-		{ reply, ReplyWith, _Result } ->
+	case catch Mod:handle_fork_call( Arg, Req, ReplyTo, WP ) of
+		{ noreply, Result } ->
+			{ stop, Result, State };
+		{ reply, ReplyWith, Result } ->
 			gen_wp:reply( ReplyTo, ReplyWith ),
-			{ stop, normal, State }
+			{ stop, Result, State };
+		Else ->
+			{ stop, { bad_return_value, Else }, State }
 	end;
 
 handle_cast( Request, State ) ->

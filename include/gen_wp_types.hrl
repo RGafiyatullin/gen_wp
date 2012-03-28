@@ -28,8 +28,9 @@
 	{ fork, Request :: term(), mod_state() } |
 	{ fork, Request :: term(), mod_state(), timeout() }.
 
--type handle_fork_cast_ret() :: 
+-type handle_fork_cast_ret() ::
 	{ noreply, Result :: term() }.
+
 -type handle_fork_call_ret() ::
 	{ reply, ReplyWith :: term(), Result :: term() } |
 	{ noreply, Result :: term() }.

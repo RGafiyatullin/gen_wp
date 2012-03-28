@@ -4,9 +4,7 @@
 
 %% API
 -export([
-	start_link/3,
-	start_child_cast/2,
-	start_child_call/3
+	start_link/3
 ]).
 
 %% supervisor callbacks
@@ -21,12 +19,6 @@
 -spec start_link( WP :: pid(), Mod :: module_spec(), Arg :: term() ) -> { ok, pid() }.
 start_link( WP, Mod, Arg ) ->
     supervisor:start_link( ?MODULE, { WP, { Mod, Arg } } ).
-
-start_child_cast( Sup, ForkMessage ) ->
-	supervisor:start_child( Sup, [ { cast, ForkMessage } ] ).
-
-start_child_call( Sup, ReplyTo, ForkRequest ) ->
-	supervisor:start_child( Sup, [ { call, ReplyTo, ForkRequest } ] ).
 
 %% ===================================================================
 %% supervisor callbacks

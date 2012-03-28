@@ -9,6 +9,10 @@
 	init/1,
 	handle_cast/2,
 	handle_call/3,
+	handle_info/2,
+	code_change/3,
+	terminate/2,
+
 	handle_fork_cast/3,
 	handle_fork_call/4
 	]).
@@ -45,17 +49,26 @@ handle_call( fork_call, _ReplyTo, State ) ->
 handle_call( Request, _ReplyTo, State ) ->
 	{ stop, { badarg, Request }, badarg, State }.
 
+handle_info( raw_message, State ) ->
+	{ noreply, State };
+
+handle_info( Info, State ) ->
+	{ stop, {badarg, Info}, State }.
+
+code_change( _OldVsn, State, _Extra ) -> { ok, State }.
+terminate( _Reason, _State ) -> ok.
+
 handle_fork_cast( _Arg, fork_cast, _WP ) ->
-	{ noreply, ok }.
+	{ noreply, normal }.
 
 handle_fork_call( _Arg, fork_call, _ReplyTo, _WP ) ->
-	{ reply, fork_reply, ok }.
-
+	{ reply, fork_reply, normal }.
 
 basic_test() ->
 	{ ok, E } = gen_wp_example:start_link( a ),
 	ok = gen_wp:cast( E, sync_cast ),
 	sync_reply = gen_wp:call( E, sync_call, infinity ),
 	ok = gen_wp:cast( E, fork_cast ),
-	fork_reply = gen_wp:call( E, fork_call, infinity ).
+	fork_reply = gen_wp:call( E, fork_call, infinity ),
+	E ! raw_message.
 
