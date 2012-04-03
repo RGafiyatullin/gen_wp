@@ -14,7 +14,9 @@
 	terminate/2,
 
 	handle_fork_cast/3,
-	handle_fork_call/4
+	handle_fork_call/4,
+	handle_forked/3,
+	handle_child_terminated/3
 	]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -63,6 +65,16 @@ handle_fork_cast( _Arg, fork_cast, _WP ) ->
 
 handle_fork_call( _Arg, fork_call, _ReplyTo, _WP ) ->
 	{ reply, fork_reply, normal }.
+
+handle_forked( Task, Child, ModState ) ->
+	io:format("Task: ~p~n", [Task]),
+	io:format("Child: ~p~n", [Child]),
+	{ noreply, ModState }.
+
+handle_child_terminated( Task, Child, ModState ) ->
+	io:format("Task: ~p~n", [Task]),
+	io:format("Child: ~p~n", [Child]),
+	{ noreply, ModState }.
 
 basic_test() ->
 	{ ok, E } = gen_wp_example:start_link( a ),

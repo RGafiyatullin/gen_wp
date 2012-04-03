@@ -44,7 +44,9 @@ behaviour_info(callbacks) ->
 		{ code_change, 3 },
 		{ terminate, 2 },
 		{ handle_fork_cast, 3 },
-		{ handle_fork_call, 4 }
+		{ handle_fork_call, 4 },
+		{ handle_forked, 3 },
+		{ handle_child_terminated, 3 }
 	].
 
 %%% API
@@ -150,6 +152,36 @@ handle_call( { 'gen_wp.call', Request }, From, State = #s{
 handle_call( Request, _From, State = #s{} ) ->
 	{ stop, { badarg, Request }, badarg, State }.
 
+handle_cast( { 'gen_wp.forked', Task, Child }, State = #s{
+		mod = Mod,
+		mod_state = ModState
+	} ) ->
+	Message =
+	case Task of
+		{ cast, Msg } -> Msg;
+		{ call, _ , Msg } -> Msg
+	end,
+	case catch Mod:handle_forked( Message, Child, ModState ) of
+		{ noreply, NModState } ->
+			{ noreply, State#s{ mod_state = NModState } };
+		Else ->
+			{ stop, {bad_return_value, Else}, State }
+	end;
+handle_cast({ 'gen_wp.child_terminated', Task, Child }, State = #s{
+		mod = Mod,
+		mod_state = ModState
+	}) ->
+	Message =
+	case Task of
+		{ cast, Msg } -> Msg;
+		{ call, _ , Msg } -> Msg
+	end,
+	case Mod:handle_child_terminated( Message, Child, ModState ) of
+		{ noreply, NModState } ->
+			{ noreply, State#s{ mod_state = NModState } };
+		Else ->
+			{ stop, { bad_return_value, Else }, State }
+	end;
 handle_cast( { 'gen_wp.cast', Message }, State = #s{
 		mod = Mod,
 		mod_state = ModState,
@@ -192,7 +224,8 @@ handle_info( Info = {'DOWN', MonRef, process, _Pid, _Reason }, State = #s{
 		pending_tasks = TQueue
 	} = Ctx,
 	case dict:find( MonRef, Refs ) of
-		{ok, _Child} ->
+		{ok, { Child, Task } } ->
+			gen_server:cast( self(), { 'gen_wp.child_terminated', Task, Child } ),
 			{ MaybeTask, NTQueue } = queue:out( TQueue ),
 			NCtx = maybe_handle_task(
 				ForkSup, MaybeTask, 
@@ -262,8 +295,9 @@ handle_task(
 		MaxPoolSize > PoolSize ->
 			{ok, Child} = supervisor:start_child( ForkSup, [ Task ] ),
 			MonRef = erlang:monitor( process, Child ),
+			gen_server:cast( self(), { 'gen_wp.forked', Task, Child } ),
 			gen_server:cast( Child, 'gen_wp_forked.process' ),
-			Ctx #gwp_ctx{ ref_to_pid = dict:store( MonRef, Child, Refs ) };
+			Ctx #gwp_ctx{ ref_to_pid = dict:store( MonRef, {Child, Task}, Refs ) };
 		true ->
 			Ctx #gwp_ctx{ pending_tasks = queue:in( Task, PendingTasks ) }
 	end.
