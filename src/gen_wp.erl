@@ -45,7 +45,7 @@ behaviour_info(callbacks) ->
 		{ terminate, 2 },
 		{ handle_fork_cast, 3 },
 		{ handle_fork_call, 4 },
-		{ handle_forked, 3 },
+		{ handle_child_forked, 3 },
 		{ handle_child_terminated, 3 }
 	].
 
@@ -152,7 +152,7 @@ handle_call( { 'gen_wp.call', Request }, From, State = #s{
 handle_call( Request, _From, State = #s{} ) ->
 	{ stop, { badarg, Request }, badarg, State }.
 
-handle_cast( { 'gen_wp.forked', Task, Child }, State = #s{
+handle_cast( { 'gen_wp.child_forked', Task, Child }, State = #s{
 		mod = Mod,
 		mod_state = ModState
 	} ) ->
@@ -161,7 +161,7 @@ handle_cast( { 'gen_wp.forked', Task, Child }, State = #s{
 		{ cast, Msg } -> Msg;
 		{ call, _ , Msg } -> Msg
 	end,
-	case catch Mod:handle_forked( Message, Child, ModState ) of
+	case catch Mod:handle_child_forked( Message, Child, ModState ) of
 		{ noreply, NModState } ->
 			{ noreply, State#s{ mod_state = NModState } };
 		Else ->
@@ -176,7 +176,7 @@ handle_cast({ 'gen_wp.child_terminated', Task, Child }, State = #s{
 		{ cast, Msg } -> Msg;
 		{ call, _ , Msg } -> Msg
 	end,
-	case Mod:handle_child_terminated( Message, Child, ModState ) of
+	case catch Mod:handle_child_terminated( Message, Child, ModState ) of
 		{ noreply, NModState } ->
 			{ noreply, State#s{ mod_state = NModState } };
 		Else ->
@@ -264,7 +264,9 @@ code_change(
 
 handle_info_passthru( Info, State = #s{
 		mod = Mod,
-		mod_state = ModState
+		mod_state = ModState,
+		fork_sup = ForkSup,
+		ctx = Ctx
 	} ) ->
 		case catch Mod:handle_info( Info, ModState ) of
 			{ noreply, NModState } ->
@@ -273,6 +275,16 @@ handle_info_passthru( Info, State = #s{
 				{ noreply, State #s{ mod_state = NModState }, Timeout };
 			{ stop, Reason, NModState } ->
 				{ stop, Reason, State #s{ mod_state = NModState } };
+
+			{ fork, ForkInfo, NModState } ->
+				Task = { cast, ForkInfo },
+				NCtx = handle_task( ForkSup, Task, Ctx ),
+				{ noreply, State #s{ mod_state = NModState, ctx = NCtx } };
+			{ fork, ForkInfo, NModState, Timeout } ->
+				Task = { cast, ForkInfo },
+				NCtx = handle_task( ForkSup, Task, Ctx ),
+				{ noreply, State #s{ mod_state = NModState, ctx = NCtx }, Timeout };
+
 			Else ->
 				{ stop, {bad_return_value, Else}, State }
 		end.
@@ -295,7 +307,7 @@ handle_task(
 		MaxPoolSize > PoolSize ->
 			{ok, Child} = supervisor:start_child( ForkSup, [ Task ] ),
 			MonRef = erlang:monitor( process, Child ),
-			gen_server:cast( self(), { 'gen_wp.forked', Task, Child } ),
+			gen_server:cast( self(), { 'gen_wp.child_forked', Task, Child } ),
 			gen_server:cast( Child, 'gen_wp_forked.process' ),
 			Ctx #gwp_ctx{ ref_to_pid = dict:store( MonRef, {Child, Task}, Refs ) };
 		true ->
