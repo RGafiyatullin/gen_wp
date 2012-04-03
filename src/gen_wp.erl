@@ -46,7 +46,7 @@ behaviour_info(callbacks) ->
 		{ handle_fork_cast, 3 },
 		{ handle_fork_call, 4 },
 		{ handle_child_forked, 3 },
-		{ handle_child_terminated, 3 }
+		{ handle_child_terminated, 4 }
 	].
 
 %%% API
@@ -167,7 +167,7 @@ handle_cast( { 'gen_wp.child_forked', Task, Child }, State = #s{
 		Else ->
 			{ stop, {bad_return_value, Else}, State }
 	end;
-handle_cast({ 'gen_wp.child_terminated', Task, Child }, State = #s{
+handle_cast({ 'gen_wp.child_terminated', Reason, Task, Child }, State = #s{
 		mod = Mod,
 		mod_state = ModState
 	}) ->
@@ -176,7 +176,7 @@ handle_cast({ 'gen_wp.child_terminated', Task, Child }, State = #s{
 		{ cast, Msg } -> Msg;
 		{ call, _ , Msg } -> Msg
 	end,
-	case catch Mod:handle_child_terminated( Message, Child, ModState ) of
+	case catch Mod:handle_child_terminated( Reason, Message, Child, ModState ) of
 		{ noreply, NModState } ->
 			{ noreply, State#s{ mod_state = NModState } };
 		Else ->
@@ -215,7 +215,7 @@ handle_cast( { 'gen_wp.cast', Message }, State = #s{
 handle_cast( Message, State = #s{} ) ->
 	{ stop, { badarg, Message }, State }.
 
-handle_info( Info = {'DOWN', MonRef, process, _Pid, _Reason }, State = #s{
+handle_info( Info = {'DOWN', MonRef, process, _Pid, Reason }, State = #s{
 		ctx = Ctx,
 		fork_sup = ForkSup
 	} ) ->
@@ -225,7 +225,7 @@ handle_info( Info = {'DOWN', MonRef, process, _Pid, _Reason }, State = #s{
 	} = Ctx,
 	case dict:find( MonRef, Refs ) of
 		{ok, { Child, Task } } ->
-			gen_server:cast( self(), { 'gen_wp.child_terminated', Task, Child } ),
+			gen_server:cast( self(), { 'gen_wp.child_terminated', Reason, Task, Child } ),
 			{ MaybeTask, NTQueue } = queue:out( TQueue ),
 			NCtx = maybe_handle_task(
 				ForkSup, MaybeTask, 

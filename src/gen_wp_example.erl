@@ -16,7 +16,7 @@
 	handle_fork_cast/3,
 	handle_fork_call/4,
 	handle_child_forked/3,
-	handle_child_terminated/3
+	handle_child_terminated/4
 	]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -77,7 +77,7 @@ handle_child_forked( Task, Child, ModState ) ->
 	io:format("forked Child: ~p~n", [Child]),
 	{ noreply, ModState }.
 
-handle_child_terminated( Task, Child, ModState ) ->
+handle_child_terminated( _Reason, Task, Child, ModState ) ->
 	io:format("termed Task: ~p~n", [Task]),
 	io:format("termed Child: ~p~n", [Child]),
 	{ noreply, ModState }.
