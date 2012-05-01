@@ -2,6 +2,8 @@
 
 -behaviour(gen_wp).
 
+-compile([warn_missing_spec]).
+
 -export([
 	start_link/1
 	]).
@@ -20,11 +22,13 @@
 	]).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("gen_wp/include/gen_wp_spec.hrl").
 
 -record(s, {
 	arg :: any()
 	}).
 
+-spec start_link(term()) -> ignore.
 start_link(Arg) ->
 	gen_wp:start_link(?MODULE, Arg).
 
