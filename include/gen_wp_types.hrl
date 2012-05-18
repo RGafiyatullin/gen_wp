@@ -28,11 +28,30 @@
 	{ fork, Request :: term(), mod_state() } |
 	{ fork, Request :: term(), mod_state(), timeout() }.
 
+-type handle_info_ret() ::
+	{ noreply, mod_state() } |
+	{ noreply, mod_state(), timeout() } |
+	{ noreply, mod_state(), hibernate } |
+	{ stop, stop_reason(), mod_state() }.
+
+-type terminate_ret() :: 
+	ignore.
+
+-type code_change_ret() ::
+	{ ok, NewState :: mod_state() } |
+	{ error, Reason :: term()}.
+
 -type handle_fork_cast_ret() ::
 	{ noreply, Result :: term() }.
 
 -type handle_fork_call_ret() ::
 	{ reply, ReplyWith :: term(), Result :: term() } |
 	{ noreply, Result :: term() }.
+
+-type handle_child_forked_ret() ::
+	ok.
+
+-type handle_child_terminated_ret() ::
+	ok.
 
 -endif. % gen_wp_types_hrl
