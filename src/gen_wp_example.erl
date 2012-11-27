@@ -86,6 +86,8 @@ handle_child_terminated( _Reason, Task, Child, ModState ) ->
 	io:format("termed Child: ~p~n", [Child]),
 	{ noreply, ModState }.
 
+-spec test() -> any().
+-spec basic_test() -> ok.
 basic_test() ->
 	{ ok, E } = gen_wp_example:start_link( a ),
 	ok = gen_wp:cast( E, sync_cast ),
